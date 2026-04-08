@@ -40,7 +40,7 @@ def reduce_dataset(
     duration_s : wall-clock seconds spent on reduction (train + test)
     """
     series_len = X_train.shape[2]
-    w = max(1, round(series_len * retention_rate))
+    w = np.round(series_len * (retention_rate)).astype(int)
     print(f"\n[reduction] {method_name} | retention={retention_rate} | {series_len} -> {w} timepoints")
 
     start = time.time()
