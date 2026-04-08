@@ -130,12 +130,17 @@ def Isomap_reduce(
     """
     Isomap reduction via sliding-window embedding.
     """
+    import warnings
+
     X = _sliding_window(series, window)
     if n_neighbors is None:
         n_neighbors = max(5, int(np.sqrt(X.shape[0])))
     n_neighbors = min(n_neighbors, X.shape[0] - 1)
 
-    X_iso = Isomap(n_neighbors=n_neighbors, n_components=min(w, X.shape[1])).fit_transform(X)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="sklearn.manifold._isomap")
+        X_iso = Isomap(n_neighbors=n_neighbors, n_components=min(w, X.shape[1])).fit_transform(X)
+
     collapsed = np.mean(X_iso, axis=1)
     return collapsed[np.linspace(0, len(collapsed) - 1, w).astype(int)]
 

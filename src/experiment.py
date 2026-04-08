@@ -40,7 +40,7 @@ def reduce_dataset(
     duration_s : wall-clock seconds spent on reduction (train + test)
     """
     series_len = X_train.shape[2]
-    w = np.round(series_len * (retention_rate)).astype(int)
+    w = max(1, round(series_len * retention_rate))
     print(f"\n[reduction] {method_name} | retention={retention_rate} | {series_len} -> {w} timepoints")
 
     start = time.time()
@@ -202,7 +202,7 @@ def run_experiment(
                     # Neighborhood preservation — computed once per (method, rate)
                     print(f"  [metrics] Computing neighborhood preservation (k={neighborhood_k})...")
                     try:
-                        nb_metrics = compute_neighborhood_metrics(X_test, X_tr, k=neighborhood_k)
+                        nb_metrics = compute_neighborhood_metrics(X_test, X_te, k=neighborhood_k)
                         append_result(
                             {
                                 "dataset": dataset,
