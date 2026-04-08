@@ -1,0 +1,53 @@
+# Experiment configuration
+# Comment/uncomment entries to include or exclude them from the run.
+
+datasets:
+  # - ACSF1
+  # - CinCECGTorso
+  # - EOGHorizontalSignal
+  # - EOGVerticalSignal
+  # - EthanolLevel
+  # - HandOutlines
+  # - Haptics
+  # - HouseTwenty
+  # - InlineSkate
+  # - Mallat
+  # - MixedShapesRegularTrain
+  # - MixedShapesSmallTrain
+  # - Phoneme
+  # - PigAirwayPressure
+  # - PigArtPressure
+  # - PigCVP
+  - Rock
+  # - SemgHandGenderCh2
+  # - SemgHandMovementCh2
+  # - SemgHandSubjectCh2
+  # - StarLightCurves
+
+classifiers:
+  - Rocket
+  - Catch22
+  - QUANT
+  - 1NN-DTW
+
+reduction_methods:
+  - PAA
+  # - DFT
+  # - DWT
+  # - SVD
+  # - PCA
+  # - KPCA
+  # - Isomap
+  # - AE
+  - CAE
+
+retention_rates:
+  # - 0.75
+  - 0.5
+  # - 0.25
+
+output:
+  results_file: results/results.csv
+
+reproducibility:
+  random_state: 1

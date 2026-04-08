@@ -1,0 +1,7 @@
+aeon
+numpy
+pandas
+scikit-learn
+pywavelets
+torch
+pyyaml
