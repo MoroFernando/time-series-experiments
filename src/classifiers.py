@@ -23,12 +23,8 @@ def get_classifiers(random_state: int = 1) -> dict:
     random_state : seed for reproducibility (default 1)
     """
     return {
-        "Rocket": RocketClassifier(
-            n_kernels=10_000, random_state=random_state, n_jobs=-1
-        ),
+        "Rocket": RocketClassifier(random_state=random_state, n_jobs=-1),
         "Catch22": Catch22Classifier(random_state=random_state, n_jobs=-1),
         "QUANT": QUANTClassifier(random_state=random_state),
-        "1NN-DTW": KNeighborsTimeSeriesClassifier(
-            n_neighbors=1, distance="dtw", n_jobs=-1
-        ),
+        "1NN-DTW": KNeighborsTimeSeriesClassifier(n_neighbors=1, distance="dtw", distance_params={"window": 0.1}, n_jobs=-1),
     }

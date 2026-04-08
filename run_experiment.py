@@ -63,6 +63,8 @@ def main():
     retention_rates = cfg["retention_rates"]
     random_state = cfg.get("reproducibility", {}).get("random_state", 1)
     output_file = cfg["output"]["results_file"]
+    neighborhood_file = cfg["output"]["neighborhood_file"]
+    neighborhood_k = cfg["output"].get("neighborhood_k", 5)
 
     selected_methods = cfg["reduction_methods"]
     unknown_methods = set(selected_methods) - set(ALL_REDUCTION_METHODS)
@@ -88,6 +90,7 @@ def main():
     print(f"  Methods         : {list(reduction_methods)}")
     print(f"  Retention rates : {retention_rates}")
     print(f"  Output          : {output_file}")
+    print(f"  Neighborhood    : {neighborhood_file} (k={neighborhood_k})")
     print("=" * 60)
 
     df = run_experiment(
@@ -96,11 +99,9 @@ def main():
         reduction_methods=reduction_methods,
         retention_rates=retention_rates,
         output_file=output_file,
+        neighborhood_file=neighborhood_file,
+        neighborhood_k=neighborhood_k,
     )
-
-    print("\n--- Results summary ---")
-    print(df.to_string(index=False))
-
 
 if __name__ == "__main__":
     main()
