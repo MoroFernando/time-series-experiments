@@ -11,6 +11,7 @@ import pywt
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from scipy.sparse import SparseEfficiencyWarning
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.manifold import Isomap
 
@@ -138,6 +139,7 @@ def Isomap_reduce(
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="sklearn.manifold._isomap")
+        warnings.filterwarnings("ignore", category=SparseEfficiencyWarning, module="scipy.sparse")
         X_iso = Isomap(n_neighbors=n_neighbors, n_components=min(w, X.shape[1])).fit_transform(X)
 
     collapsed = np.mean(X_iso, axis=1)
