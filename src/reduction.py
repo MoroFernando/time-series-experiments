@@ -6,7 +6,6 @@ All functions follow the signature:
 
 where `w` is the target number of timepoints to *retain*.
 """
-
 import numpy as np
 import pywt
 import torch
