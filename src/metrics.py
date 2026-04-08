@@ -34,7 +34,7 @@ def precision_at_k(X_orig: np.ndarray, X_reduced: np.ndarray, k: int = 5) -> flo
     _, idx_red  = NearestNeighbors(n_neighbors=k + 1).fit(X_reduced).kneighbors(X_reduced)
 
     scores = [
-        len(set(idx_orig[i, 1:]) & set(idx_red[i, 1:])) / k
+        len(set(idx_orig[i, 1:k+1]) & set(idx_red[i, 1:k+1])) / k
         for i in range(n)
     ]
     return float(np.mean(scores))

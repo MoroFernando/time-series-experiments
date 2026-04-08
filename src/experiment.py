@@ -102,14 +102,18 @@ def train_and_evaluate(
     train_time_s : wall-clock seconds for clf.fit()
     test_time_s : wall-clock seconds for clf.predict()
     """
-    print(f"  [clf] Training {clf_name}...")
-    t0 = time.time()
-    clf.fit(X_train, y_train)
-    train_time = round(time.time() - t0, 2)
+    import warnings
 
-    t0 = time.time()
-    y_pred = clf.predict(X_test)
-    test_time = round(time.time() - t0, 2)
+    print(f"  [clf] Training {clf_name}...")
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="unsafe cast", module="numba")
+        t0 = time.time()
+        clf.fit(X_train, y_train)
+        train_time = round(time.time() - t0, 2)
+
+        t0 = time.time()
+        y_pred = clf.predict(X_test)
+        test_time = round(time.time() - t0, 2)
 
     acc = accuracy_score(y_test, y_pred)
     print(f"  [clf] {clf_name} — accuracy={acc:.4f}, train={train_time}s, test={test_time}s")
