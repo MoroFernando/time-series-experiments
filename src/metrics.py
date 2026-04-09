@@ -75,6 +75,6 @@ def compute_neighborhood_metrics(
     red_flat  = X_reduced.reshape(n, -1)
 
     return {
-        f"precision@{k}": precision_at_k(orig_flat, red_flat, k),
+        f"precision@k": precision_at_k(orig_flat, red_flat, k),
         "trustworthiness": compute_trustworthiness(orig_flat, red_flat, k),
     }

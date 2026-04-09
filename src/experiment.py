@@ -212,11 +212,11 @@ def run_experiment(
     retention_rates: list[float],
     output_file: str,
     neighborhood_file: str,
-    neighborhood_k: int = 5,
+    neighborhood_ks: list[int] = None,
 ) -> pd.DataFrame:
     """
     For each dataset × (original + method × retention_rate) × classifier:
-    reduce, evaluate neighborhood preservation (once per method/rate), train,
+    reduce, evaluate neighborhood preservation (once per method/rate/k), train,
     evaluate accuracy, and persist both result sets incrementally.
 
     Parameters
@@ -228,8 +228,10 @@ def run_experiment(
     retention_rates : list of floats in (0, 1] — fraction of timepoints to keep
     output_file : path to the classification results CSV
     neighborhood_file : path to the neighborhood preservation results CSV
-    neighborhood_k : k for precision@k and trustworthiness (default 5)
+    neighborhood_ks : list of k values for precision@k and trustworthiness (default [5])
     """
+    if neighborhood_ks is None:
+        neighborhood_ks = [5]
     from .datasets import load_and_normalize
     from .metrics import compute_neighborhood_metrics
 
@@ -274,23 +276,25 @@ def run_experiment(
                         print(f"[error] Reduction failed: {e}")
                         continue
 
-                    # Neighborhood preservation — computed once per (method, rate)
-                    print(f"  [metrics] Computing neighborhood preservation (k={neighborhood_k})...")
-                    try:
-                        nb_metrics = compute_neighborhood_metrics(X_test, X_te, k=neighborhood_k)
-                        append_result(
-                            {
-                                "dataset": dataset,
-                                "reduction_method": method_name,
-                                "retention_rate": rate,
-                                "series_size": X_tr.shape[2],
-                                **nb_metrics,
-                            },
-                            neighborhood_file,
-                        )
-                        print(f"  [metrics] " + " | ".join(f"{k}={v:.4f}" for k, v in nb_metrics.items()))
-                    except Exception as e:
-                        print(f"  [metrics] Failed: {e}")
+                    # Neighborhood preservation — computed once per (method, rate, k)
+                    print(f"  [metrics] Computing neighborhood preservation (ks={neighborhood_ks})...")
+                    for k in neighborhood_ks:
+                        try:
+                            nb_metrics = compute_neighborhood_metrics(X_test, X_te, k=k)
+                            append_result(
+                                {
+                                    "dataset": dataset,
+                                    "reduction_method": method_name,
+                                    "retention_rate": rate,
+                                    "series_size": X_tr.shape[2],
+                                    "k": k,
+                                    **nb_metrics,
+                                },
+                                neighborhood_file,
+                            )
+                            print(f"  [metrics] k={k} | " + " | ".join(f"{m}={v:.4f}" for m, v in nb_metrics.items()))
+                        except Exception as e:
+                            print(f"  [metrics] k={k} Failed: {e}")
 
                     # Classification — one row per classifier
                     for clf_name, clf in classifiers_factory().items():

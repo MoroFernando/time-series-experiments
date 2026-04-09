@@ -52,7 +52,7 @@ retention_rates:
 output:
   results_file: results/results.csv
   neighborhood_file: results/results_neighborhood.csv
-  neighborhood_k: 5
+  neighborhood_ks: [5, 10, 20]
 
 reproducibility:
   random_state: 1
