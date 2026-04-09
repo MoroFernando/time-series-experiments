@@ -29,6 +29,7 @@ classifiers:
   - Catch22
   - QUANT
   - 1NN-DTW
+  - LITE
 
 reduction_methods:
   - PAA

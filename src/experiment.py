@@ -5,6 +5,7 @@ import gc
 import os
 import sys
 import time
+from multiprocessing import Process, Queue
 
 import numpy as np
 import pandas as pd
@@ -84,6 +85,40 @@ def _print_progress(label: str, done: int, total: int, bar_len: int = 30) -> Non
 # Training & evaluation
 # ---------------------------------------------------------------------------
 
+def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
+    """
+    Worker function executed in a separate process for LITE (TensorFlow).
+
+    TensorFlow does not release GPU/RAM memory after training even with explicit
+    deletion. Running it in a subprocess guarantees full memory release when the
+    process exits.
+    """
+    try:
+        import warnings
+        import time
+        import tensorflow as tf
+        from sklearn.metrics import accuracy_score
+
+        # Allow TF to allocate GPU memory incrementally instead of all at once
+        for gpu in tf.config.list_physical_devices("GPU"):
+            tf.config.experimental.set_memory_growth(gpu, True)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="unsafe cast", module="numba")
+            t0 = time.time()
+            clf.fit(X_train, y_train)
+            train_time = round(time.time() - t0, 2)
+
+            t0 = time.time()
+            y_pred = clf.predict(X_test)
+            test_time = round(time.time() - t0, 2)
+
+        acc = accuracy_score(y_test, y_pred)
+        queue.put((acc, train_time, test_time))
+    except Exception as e:
+        queue.put(e)
+
+
 def train_and_evaluate(
     clf_name: str,
     clf,
@@ -95,15 +130,35 @@ def train_and_evaluate(
     """
     Fit a classifier and evaluate it.
 
+    LITE is run in an isolated subprocess so TensorFlow releases all GPU/RAM
+    memory when the process exits. All other classifiers run in-process.
+
     Returns
     -------
     accuracy : float
     train_time_s : wall-clock seconds for clf.fit()
     test_time_s : wall-clock seconds for clf.predict()
     """
+    print(f"  [clf] Training {clf_name}...")
+
+    if clf_name == "LITE":
+        acc, train_time, test_time = _run_lite_in_subprocess(clf, X_train, y_train, X_test, y_test)
+    else:
+        acc, train_time, test_time = _run_inprocess(clf, X_train, y_train, X_test, y_test)
+
+    print(f"  [clf] {clf_name} — accuracy={acc:.4f}, train={train_time}s, test={test_time}s")
+    return acc, train_time, test_time
+
+
+def _run_inprocess(
+    clf,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+) -> tuple[float, float, float]:
     import warnings
 
-    print(f"  [clf] Training {clf_name}...")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="unsafe cast", module="numba")
         t0 = time.time()
@@ -115,8 +170,25 @@ def train_and_evaluate(
         test_time = round(time.time() - t0, 2)
 
     acc = accuracy_score(y_test, y_pred)
-    print(f"  [clf] {clf_name} — accuracy={acc:.4f}, train={train_time}s, test={test_time}s")
     return acc, train_time, test_time
+
+
+def _run_lite_in_subprocess(
+    clf,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+) -> tuple[float, float, float]:
+    q = Queue()
+    p = Process(target=_lite_worker, args=(clf, X_train, y_train, X_test, y_test, q))
+    p.start()
+    result = q.get()
+    p.join()
+
+    if isinstance(result, Exception):
+        raise result
+    return result
 
 
 # ---------------------------------------------------------------------------

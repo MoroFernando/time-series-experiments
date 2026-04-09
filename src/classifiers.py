@@ -6,6 +6,7 @@ Classifiers are re-instantiated per experiment run to avoid state bleed.
 """
 
 from aeon.classification.convolution_based import RocketClassifier
+from aeon.classification.deep_learning import LITETimeClassifier
 from aeon.classification.distance_based import KNeighborsTimeSeriesClassifier
 from aeon.classification.feature_based import Catch22Classifier
 from aeon.classification.interval_based import QUANTClassifier
@@ -27,4 +28,5 @@ def get_classifiers(random_state: int = 1) -> dict:
         "Catch22": Catch22Classifier(random_state=random_state, n_jobs=-1),
         "QUANT": QUANTClassifier(random_state=random_state),
         "1NN-DTW": KNeighborsTimeSeriesClassifier(n_neighbors=1, distance="dtw", distance_params={"window": 0.1}, n_jobs=-1),
+        "LITE": LITETimeClassifier(random_state=random_state),
     }
