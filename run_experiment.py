@@ -10,6 +10,7 @@ Usage
 import argparse
 import os
 
+import torch
 import yaml
 
 from src.classifiers import get_classifiers
@@ -55,6 +56,30 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def print_gpu_info() -> None:
+    """Print detected GPU(s) for PyTorch and TensorFlow."""
+
+    # PyTorch
+    if torch.cuda.is_available():
+        gpus = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+        print(f"  PyTorch GPU(s)  : {', '.join(gpus)}")
+    else:
+        print("  PyTorch GPU     : not detected (CPU only)")
+
+    # TensorFlow — imported locally to avoid paying the TF startup cost upfront
+    try:
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+        import tensorflow as tf
+        tf_gpus = tf.config.list_physical_devices("GPU")
+        if tf_gpus:
+            names = [g.name for g in tf_gpus]
+            print(f"  TensorFlow GPU  : {', '.join(names)}")
+        else:
+            print("  TensorFlow GPU  : not detected (CPU only)")
+    except Exception:
+        print("  TensorFlow GPU  : could not query (TF not installed?)")
+
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
@@ -91,6 +116,7 @@ def main():
     print(f"  Retention rates : {retention_rates}")
     print(f"  Output          : {output_file}")
     print(f"  Neighborhood    : {neighborhood_file} (ks={neighborhood_ks})")
+    print_gpu_info()
     print("=" * 60)
 
     df = run_experiment(
