@@ -221,6 +221,19 @@ def _train_autoencoder(model: nn.Module, x: torch.Tensor, epochs: int, lr: float
         optimizer.step()
 
 
+def _print_train_progress(epoch: int, total: int, loss: float, bar_len: int = 30) -> None:
+    """Overwrite the current line with an epoch-level training progress bar."""
+    import sys
+    pct   = epoch / total
+    filled = int(pct * bar_len)
+    bar   = "█" * filled + "-" * (bar_len - filled)
+    sys.stdout.write(
+        f"\r  [training] [{bar}] {pct:>5.1%}  "
+        f"epoch {epoch:>{len(str(total))}}/{total}  loss={loss:.6f}"
+    )
+    sys.stdout.flush()
+
+
 def _train_autoencoder_batched(
     model: nn.Module,
     X: torch.Tensor,
@@ -231,16 +244,21 @@ def _train_autoencoder_batched(
     """Train an autoencoder on a dataset using mini-batches (global mode)."""
     from torch.utils.data import DataLoader, TensorDataset
 
-    loader = DataLoader(TensorDataset(X), batch_size=batch_size, shuffle=True)
+    loader    = DataLoader(TensorDataset(X), batch_size=batch_size, shuffle=True)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
     model.train()
-    for _ in range(epochs):
+    for epoch in range(epochs):
+        epoch_loss = 0.0
         for (batch,) in loader:
             optimizer.zero_grad()
             recon, _ = model(batch)
-            criterion(recon, batch).backward()
+            loss = criterion(recon, batch)
+            loss.backward()
             optimizer.step()
+            epoch_loss += loss.item()
+        _print_train_progress(epoch + 1, epochs, epoch_loss / len(loader))
+    print()  # newline after the progress bar
 
 
 class _GlobalReducer:
@@ -537,10 +555,10 @@ class _TCNBlock(nn.Module):
     ):
         super().__init__()
         self._total_pad = (kernel_size - 1) * dilation
-        self.conv1 = nn.utils.weight_norm(
+        self.conv1 = nn.utils.parametrizations.weight_norm(
             nn.Conv1d(in_channels, n_filters, kernel_size, dilation=dilation)
         )
-        self.conv2 = nn.utils.weight_norm(
+        self.conv2 = nn.utils.parametrizations.weight_norm(
             nn.Conv1d(n_filters, n_filters, kernel_size, dilation=dilation)
         )
         self.relu    = nn.ReLU()
