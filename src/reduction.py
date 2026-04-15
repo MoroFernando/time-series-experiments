@@ -15,6 +15,7 @@ import numpy as np
 import pywt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from scipy.sparse import SparseEfficiencyWarning
 from sklearn.decomposition import PCA, KernelPCA
@@ -229,6 +230,254 @@ class _ConvAE(nn.Module):
     def forward(self, x):
         latent = self.channel_mixer(self.encoder(x))
         return self.decoder(latent), latent
+
+
+# ---------------------------------------------------------------------------
+# TCN Autoencoder (Thill et al., 2021)
+# ---------------------------------------------------------------------------
+
+class _TCNBlock(nn.Module):
+    """
+    Residual block with two acausal dilated convolutions that preserve the
+    sequence length (same-length output via symmetric padding).
+
+    Weight normalisation is applied following the original TCN paper.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        n_filters: int,
+        kernel_size: int,
+        dilation: int,
+        dropout: float = 0.2,
+    ):
+        super().__init__()
+        self._total_pad = (kernel_size - 1) * dilation
+        self.conv1 = nn.utils.weight_norm(
+            nn.Conv1d(in_channels, n_filters, kernel_size, dilation=dilation)
+        )
+        self.conv2 = nn.utils.weight_norm(
+            nn.Conv1d(n_filters, n_filters, kernel_size, dilation=dilation)
+        )
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        # 1×1 conv to match channel dimensions in the residual path
+        self.skip = nn.Conv1d(in_channels, n_filters, 1) if in_channels != n_filters else None
+
+    def _pad(self, x: torch.Tensor) -> torch.Tensor:
+        """Symmetric (acausal) same-length padding."""
+        p = self._total_pad
+        return F.pad(x, (p // 2, p - p // 2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.dropout(self.relu(self.conv1(self._pad(x))))
+        out = self.dropout(self.relu(self.conv2(self._pad(out))))
+        res = x if self.skip is None else self.skip(x)
+        return self.relu(out + res)
+
+
+class _TCN(nn.Module):
+    """
+    Stack of TCN residual blocks.
+
+    Dilation rates grow exponentially: 1, 2, 4, …, 2^(n_levels-1).
+    This gives the network a receptive field that scales exponentially with
+    depth, allowing it to capture long-range temporal dependencies.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        n_filters: int,
+        kernel_size: int,
+        n_levels: int,
+        dropout: float = 0.2,
+    ):
+        super().__init__()
+        blocks = []
+        for i in range(n_levels):
+            in_ch = in_channels if i == 0 else n_filters
+            blocks.append(
+                _TCNBlock(in_ch, n_filters, kernel_size, dilation=2 ** i, dropout=dropout)
+            )
+        self.net = nn.Sequential(*blocks)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class _TCNAE(nn.Module):
+    """
+    TCN Autoencoder as described in Thill et al. (2021).
+
+    Architecture (Fig. 2 of the paper):
+
+    Encoder
+    -------
+    Input (1, T)
+    → TCN  (dilations=1..2^(n_levels-1), k=kernel_size, n_filters filters)
+    → Conv1d (1×1, latent_channels filters)     ← channel compression
+    → AdaptiveAvgPool1d(w)                       ← temporal downsampling
+    → Conv1d (1×1, 1 filter)                     ← single-channel latent
+
+    Decoder
+    -------
+    AdaptiveAvgPool output (latent_channels, w)  ← uses pre-mixer representation
+    → Upsample(T, mode='nearest')
+    → TCN  (same hyper-params, independent weights)
+    → Conv1d (1×1, 1 filter)                     ← reconstruct univariate series
+
+    forward() returns (reconstruction, latent) matching _train_autoencoder.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        target_len: int,
+        n_filters: int = 20,
+        kernel_size: int = 20,
+        n_levels: int = 5,
+        latent_channels: int = 8,
+        dropout: float = 0.2,
+    ):
+        super().__init__()
+        # --- Encoder ---
+        self.enc_tcn = _TCN(1, n_filters, kernel_size, n_levels, dropout)
+        self.enc_proj = nn.Conv1d(n_filters, latent_channels, 1)   # 1×1 channel reduction
+        self.pool = nn.AdaptiveAvgPool1d(target_len)
+        self.channel_mixer = nn.Conv1d(latent_channels, 1, 1)      # collapse to 1-D latent
+        # --- Decoder ---
+        self.upsample = nn.Upsample(size=input_dim, mode="nearest")
+        self.dec_tcn = _TCN(latent_channels, n_filters, kernel_size, n_levels, dropout)
+        self.dec_proj = nn.Conv1d(n_filters, 1, 1)                  # univariate reconstruction
+
+    def forward(self, x: torch.Tensor):
+        # Encoder
+        enc = self.enc_proj(self.enc_tcn(x))    # (B, latent_channels, T)
+        enc_pooled = self.pool(enc)              # (B, latent_channels, w)
+        latent = self.channel_mixer(enc_pooled) # (B, 1, w)
+        # Decoder — uses the multi-channel enc_pooled, not the 1-D latent
+        up = self.upsample(enc_pooled)           # (B, latent_channels, T)
+        recon = self.dec_proj(self.dec_tcn(up)) # (B, 1, T)
+        return recon, latent
+
+
+def TCN_reduce(
+    series: np.ndarray,
+    w: int,
+    n_filters: int = 20,
+    kernel_size: int = 20,
+    n_levels: int = 5,
+    latent_channels: int = 8,
+    dropout: float = 0.2,
+    epochs: int = 50,
+    lr: float = 0.01,
+) -> np.ndarray:
+    """
+    TCN Autoencoder reduction (single-instance).
+
+    Trains a TCN-AE (Thill et al., 2021) on the single input series.
+    The temporal average pooling layer produces a latent of length w.
+    Sign is corrected by correlation with the subsampled original.
+    """
+    N = len(series)
+    if w >= N:
+        raise ValueError("w must be smaller than series length.")
+
+    device = _get_device()
+    x = torch.FloatTensor(series).view(1, 1, -1).to(device)
+    model = _TCNAE(N, w, n_filters, kernel_size, n_levels, latent_channels, dropout).to(device)
+    _train_autoencoder(model, x, epochs, lr)
+
+    model.eval()
+    with torch.no_grad():
+        _, latent = model(x)
+    reduced = latent.squeeze().cpu().numpy()
+
+    subsampled = series[np.linspace(0, N - 1, w).astype(int)]
+    if np.std(reduced) > 1e-9 and np.std(subsampled) > 1e-9:
+        if np.corrcoef(reduced, subsampled)[0, 1] < 0:
+            reduced = -reduced
+
+    return reduced
+
+
+class TCNGlobalReducer:
+    """
+    TCN Autoencoder reduction — global training mode.
+
+    A single TCN-AE (Thill et al., 2021) is trained on all series in the
+    training set (across all samples and channels). The trained encoder is
+    then applied to both splits, so test series are never seen during training.
+
+    Exposes the dataset-level interface used by `reduce_dataset`:
+        fit_transform(X_train, w) -> np.ndarray
+        transform(X_test, w)     -> np.ndarray
+    where X has shape (n_samples, n_channels, n_timepoints).
+    """
+
+    def __init__(
+        self,
+        n_filters: int = 20,
+        kernel_size: int = 20,
+        n_levels: int = 5,
+        latent_channels: int = 8,
+        dropout: float = 0.2,
+        epochs: int = 50,
+        lr: float = 0.01,
+        batch_size: int = 32,
+    ):
+        self.n_filters = n_filters
+        self.kernel_size = kernel_size
+        self.n_levels = n_levels
+        self.latent_channels = latent_channels
+        self.dropout = dropout
+        self.epochs = epochs
+        self.lr = lr
+        self.batch_size = batch_size
+        self._model: _TCNAE | None = None
+        self._w: int | None = None
+
+    def fit_transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        if w >= N:
+            raise ValueError("w must be smaller than series length.")
+
+        device = _get_device()
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).unsqueeze(1).to(device)
+
+        self._model = _TCNAE(
+            N, w, self.n_filters, self.kernel_size,
+            self.n_levels, self.latent_channels, self.dropout,
+        ).to(device)
+        self._w = w
+        _train_autoencoder_batched(self._model, X_tensor, self.epochs, self.lr, self.batch_size)
+
+        return self._encode(X, device)
+
+    def transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("Call fit_transform before transform.")
+        if w != self._w:
+            raise ValueError(f"w={w} does not match fitted w={self._w}.")
+
+        device = _get_device()
+        return self._encode(X, device)
+
+    def _encode(self, X: np.ndarray, device: torch.device) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).unsqueeze(1).to(device)
+
+        self._model.eval()
+        with torch.no_grad():
+            _, latent = self._model(X_tensor)
+        reduced_flat = latent.squeeze(1).cpu().numpy()  # (n_samples*n_channels, w)
+
+        reduced_flat = _sign_correct_batch(reduced_flat, X_flat, self._w)
+        return reduced_flat.reshape(n_samples, n_channels, self._w)
 
 
 def AE_reduce(

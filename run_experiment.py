@@ -27,6 +27,8 @@ from src.reduction import (
     PAA_reduce,
     PCA_reduce,
     SVD_reduce,
+    TCN_reduce,
+    TCNGlobalReducer,
 )
 
 ALL_REDUCTION_METHODS = {
@@ -41,6 +43,8 @@ ALL_REDUCTION_METHODS = {
     "AE-Global": AEGlobalReducer,
     "CAE": CAE_reduce,
     "CAE-Global": CAEGlobalReducer,
+    "TCN": TCN_reduce,
+    "TCN-Global": TCNGlobalReducer,
 }
 
 
