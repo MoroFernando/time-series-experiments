@@ -108,8 +108,12 @@ def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
     process exits.
     """
     try:
+        import os
         import warnings
         import time
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
+        os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+        os.environ.setdefault("GLOG_minloglevel",       "3")
         import tensorflow as tf
         from sklearn.metrics import accuracy_score
 

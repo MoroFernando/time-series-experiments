@@ -7,8 +7,21 @@ Usage
     python run_experiment.py --config my.yaml   # custom config
 """
 
-import argparse
+# ── Silence TensorFlow / oneDNN C++ logging ───────────────────────────────
+# These variables MUST be set before any import that loads the TF C++ runtime
+# (including indirect imports via aeon.classification.deep_learning).
+#
+#   TF_CPP_MIN_LOG_LEVEL  0=DEBUG 1=INFO 2=WARNING 3=ERROR (only FATAL shown)
+#   TF_ENABLE_ONEDNN_OPTS 0  →  disables oneDNN and suppresses its banner
+#   GLOG_minloglevel      3  →  silences absl/glog C++ messages (incl. the
+#                               "before absl::InitializeLog" bootstrap warning)
 import os
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("GLOG_minloglevel",       "3")
+# ──────────────────────────────────────────────────────────────────────────
+
+import argparse
 
 import torch
 import yaml
@@ -76,7 +89,6 @@ def print_gpu_info() -> None:
 
     # TensorFlow — imported locally to avoid paying the TF startup cost upfront
     try:
-        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
         import tensorflow as tf
         tf_gpus = tf.config.list_physical_devices("GPU")
         if tf_gpus:
