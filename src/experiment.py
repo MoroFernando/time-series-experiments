@@ -43,9 +43,23 @@ def reduce_dataset(
     w = max(1, round(series_len * retention_rate))
     print(f"\n[reduction] {method_name} | retention={retention_rate} | {series_len} -> {w} timepoints")
 
+    import inspect
+
+    # If the method is a class (global-style reducer), instantiate it fresh so
+    # each (dataset, retention_rate) combination gets its own model.
+    if inspect.isclass(method):
+        method = method()
+
     start = time.time()
-    X_train_red = _apply_reduction(method, X_train, w, label="Train")
-    X_test_red = _apply_reduction(method, X_test, w, label="Test ")
+    if hasattr(method, "fit_transform"):
+        # Global method: train once on all training series, then encode both splits.
+        X_train_red = method.fit_transform(X_train, w)
+        print(f"  Train: done ({len(X_train)} samples)")
+        X_test_red = method.transform(X_test, w)
+        print(f"  Test : done ({len(X_test)} samples)")
+    else:
+        X_train_red = _apply_reduction(method, X_train, w, label="Train")
+        X_test_red = _apply_reduction(method, X_test, w, label="Test ")
     duration = round(time.time() - start, 2)
 
     print(f"[reduction] Done in {duration}s")

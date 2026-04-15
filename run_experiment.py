@@ -18,6 +18,7 @@ from src.experiment import run_experiment
 from src.reduction import (
     AE_reduce,
     CAE_reduce,
+    CAEGlobalReducer,
     DFT_reduce,
     DWT_reduce,
     Isomap_reduce,
@@ -37,6 +38,7 @@ ALL_REDUCTION_METHODS = {
     "Isomap": Isomap_reduce,
     "AE": AE_reduce,
     "CAE": CAE_reduce,
+    "CAE-Global": CAEGlobalReducer,
 }
 
 

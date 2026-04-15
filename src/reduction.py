@@ -1,10 +1,15 @@
 """
 Dimensionality reduction methods for time series.
 
-All functions follow the signature:
+Per-series methods follow the signature:
     reduce(series: np.ndarray, w: int, **kwargs) -> np.ndarray
 
-where `w` is the target number of timepoints to *retain*.
+Global methods (train on the full dataset) expose:
+    method.fit_transform(X: np.ndarray, w: int) -> np.ndarray
+    method.transform(X: np.ndarray, w: int) -> np.ndarray
+where X has shape (n_samples, n_channels, n_timepoints).
+
+`w` is the target number of timepoints to *retain* in all cases.
 """
 import numpy as np
 import pywt
@@ -165,6 +170,29 @@ def _train_autoencoder(model: nn.Module, x: torch.Tensor, epochs: int, lr: float
         optimizer.step()
 
 
+def _train_autoencoder_batched(
+    model: nn.Module,
+    X: torch.Tensor,
+    epochs: int,
+    lr: float,
+    batch_size: int,
+) -> None:
+    """Train an autoencoder on a dataset using mini-batches."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    dataset = TensorDataset(X)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.MSELoss()
+    model.train()
+    for _ in range(epochs):
+        for (batch,) in loader:
+            optimizer.zero_grad()
+            recon, _ = model(batch)
+            criterion(recon, batch).backward()
+            optimizer.step()
+
+
 class _DenseAE(nn.Module):
     def __init__(self, input_dim: int, latent_dim: int, hidden_dim: int):
         super().__init__()
@@ -265,3 +293,110 @@ def CAE_reduce(
             reduced = -reduced
 
     return reduced
+
+
+def _sign_correct_batch(reduced: np.ndarray, originals: np.ndarray, w: int) -> np.ndarray:
+    """Apply per-series sign correction to a batch of reduced series."""
+    N = originals.shape[1]
+    idx = np.linspace(0, N - 1, w).astype(int)
+    result = reduced.copy()
+    for i, (r, s) in enumerate(zip(reduced, originals)):
+        sub = s[idx]
+        if np.std(r) > 1e-9 and np.std(sub) > 1e-9:
+            if np.corrcoef(r, sub)[0, 1] < 0:
+                result[i] = -r
+    return result
+
+
+class CAEGlobalReducer:
+    """
+    Convolutional Autoencoder reduction — global training mode.
+
+    A single CAE is trained on all series in the training set (across all
+    samples and channels). The trained encoder is then applied to both the
+    training and test sets, so test series are never seen during training.
+
+    Exposes the dataset-level interface used by `reduce_dataset`:
+        fit_transform(X_train, w) -> np.ndarray
+        transform(X_test, w)     -> np.ndarray
+    where X has shape (n_samples, n_channels, n_timepoints).
+    """
+
+    def __init__(
+        self,
+        epochs: int = 50,
+        lr: float = 0.01,
+        n_channels: int = 8,
+        batch_size: int = 32,
+    ):
+        self.epochs = epochs
+        self.lr = lr
+        self.n_channels = n_channels
+        self.batch_size = batch_size
+        self._model: _ConvAE | None = None
+        self._w: int | None = None
+
+    def fit_transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        """
+        Train on all series in X, then return their latent representations.
+
+        Parameters
+        ----------
+        X : (n_samples, n_channels, n_timepoints)
+        w : target length after reduction
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_channels, w)
+        """
+        n_samples, n_channels, N = X.shape
+        if w >= N:
+            raise ValueError("w must be smaller than series length.")
+
+        device = _get_device()
+
+        # Flatten all series into a single batch: (n_samples*n_channels, 1, N)
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).unsqueeze(1).to(device)
+
+        self._model = _ConvAE(N, w, self.n_channels).to(device)
+        self._w = w
+        _train_autoencoder_batched(self._model, X_tensor, self.epochs, self.lr, self.batch_size)
+
+        return self._encode(X, device)
+
+    def transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        """
+        Apply the already-trained encoder to X.
+
+        Parameters
+        ----------
+        X : (n_samples, n_channels, n_timepoints)
+        w : must match the w used in fit_transform
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_channels, w)
+        """
+        if self._model is None:
+            raise RuntimeError("Call fit_transform before transform.")
+        if w != self._w:
+            raise ValueError(f"w={w} does not match fitted w={self._w}.")
+
+        device = _get_device()
+        return self._encode(X, device)
+
+    def _encode(self, X: np.ndarray, device: torch.device) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        w = self._w
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).unsqueeze(1).to(device)
+
+        self._model.eval()
+        with torch.no_grad():
+            _, latent = self._model(X_tensor)
+        # latent: (n_samples*n_channels, 1, w)
+        reduced_flat = latent.squeeze(1).cpu().numpy()  # (n_samples*n_channels, w)
+
+        reduced_flat = _sign_correct_batch(reduced_flat, X_flat, w)
+        return reduced_flat.reshape(n_samples, n_channels, w)
