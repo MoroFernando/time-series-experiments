@@ -295,6 +295,70 @@ def CAE_reduce(
     return reduced
 
 
+class AEGlobalReducer:
+    """
+    Dense Autoencoder reduction — global training mode.
+
+    A single fully-connected AE is trained on all series in the training set
+    (across all samples and channels). The trained encoder is then applied to
+    both splits, so test series are never seen during training.
+
+    Exposes the dataset-level interface used by `reduce_dataset`:
+        fit_transform(X_train, w) -> np.ndarray
+        transform(X_test, w)     -> np.ndarray
+    where X has shape (n_samples, n_channels, n_timepoints).
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        epochs: int = 30,
+        lr: float = 0.01,
+        batch_size: int = 32,
+    ):
+        self.hidden_dim = hidden_dim
+        self.epochs = epochs
+        self.lr = lr
+        self.batch_size = batch_size
+        self._model: _DenseAE | None = None
+        self._w: int | None = None
+
+    def fit_transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        if w >= N:
+            raise ValueError("w must be smaller than series length.")
+
+        device = _get_device()
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).to(device)
+
+        self._model = _DenseAE(N, w, self.hidden_dim).to(device)
+        self._w = w
+        _train_autoencoder_batched(self._model, X_tensor, self.epochs, self.lr, self.batch_size)
+
+        return self._encode(X, device)
+
+    def transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("Call fit_transform before transform.")
+        if w != self._w:
+            raise ValueError(f"w={w} does not match fitted w={self._w}.")
+
+        device = _get_device()
+        return self._encode(X, device)
+
+    def _encode(self, X: np.ndarray, device: torch.device) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_tensor = torch.from_numpy(X_flat).to(device)
+
+        self._model.eval()
+        with torch.no_grad():
+            _, latent = self._model(X_tensor)
+        reduced_flat = latent.cpu().numpy()  # (n_samples*n_channels, w)
+        return reduced_flat.reshape(n_samples, n_channels, self._w)
+
+
 def _sign_correct_batch(reduced: np.ndarray, originals: np.ndarray, w: int) -> np.ndarray:
     """Apply per-series sign correction to a batch of reduced series."""
     N = originals.shape[1]

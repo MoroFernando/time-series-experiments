@@ -17,6 +17,7 @@ from src.classifiers import get_classifiers
 from src.experiment import run_experiment
 from src.reduction import (
     AE_reduce,
+    AEGlobalReducer,
     CAE_reduce,
     CAEGlobalReducer,
     DFT_reduce,
@@ -37,6 +38,7 @@ ALL_REDUCTION_METHODS = {
     "KPCA": KPCA_reduce,
     "Isomap": Isomap_reduce,
     "AE": AE_reduce,
+    "AE-Global": AEGlobalReducer,
     "CAE": CAE_reduce,
     "CAE-Global": CAEGlobalReducer,
 }
