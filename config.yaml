@@ -26,10 +26,12 @@ datasets:
 
 classifiers:
   - Rocket
-  - Catch22
+  # - Catch22
   - QUANT
   - 1NN-DTW
   - LITE
+  - MUSE
+  - FreshPRINCE
 
 reduction_methods:
   - PAA
@@ -40,7 +42,12 @@ reduction_methods:
   - KPCA
   - Isomap
   - AE
+  - AE-SIT
   - CAE
+  - CAE-SIT
+  - TCN
+  - TCN-SIT
+  - S2V
 
 retention_rates:
   - 0.85

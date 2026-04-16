@@ -7,19 +7,10 @@ Usage
     python run_experiment.py --config my.yaml   # custom config
 """
 
-# ── Silence TensorFlow / oneDNN C++ logging ───────────────────────────────
-# These variables MUST be set before any import that loads the TF C++ runtime
-# (including indirect imports via aeon.classification.deep_learning).
-#
-#   TF_CPP_MIN_LOG_LEVEL  0=DEBUG 1=INFO 2=WARNING 3=ERROR (only FATAL shown)
-#   TF_ENABLE_ONEDNN_OPTS 0  →  disables oneDNN and suppresses its banner
-#   GLOG_minloglevel      3  →  silences absl/glog C++ messages (incl. the
-#                               "before absl::InitializeLog" bootstrap warning)
 import os
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("GLOG_minloglevel",       "3")
-# ──────────────────────────────────────────────────────────────────────────
 
 import argparse
 
@@ -28,38 +19,23 @@ import yaml
 
 from src.classifiers import get_classifiers
 from src.experiment import run_experiment
-from src.reduction import (
-    PAA_reduce,
-    DFT_reduce,
-    DWT_reduce,
-    SVD_reduce,
-    PCA_reduce,
-    KPCA_reduce,
-    Isomap_reduce,
-    AEReducer,
-    AE_SIT_reduce,
-    CAEReducer,
-    CAE_SIT_reduce,
-    TCNReducer,
-    TCN_SIT_reduce,
-    Series2VecReducer,
-)
+from src import reduction
 
 ALL_REDUCTION_METHODS = {
-    "PAA":    PAA_reduce,
-    "DFT":    DFT_reduce,
-    "DWT":    DWT_reduce,
-    "SVD":    SVD_reduce,
-    "PCA":    PCA_reduce,
-    "KPCA":   KPCA_reduce,
-    "Isomap": Isomap_reduce,
-    "AE":     AEReducer,
-    "AE-SIT": AE_SIT_reduce,
-    "CAE":     CAEReducer,
-    "CAE-SIT": CAE_SIT_reduce,
-    "TCN":     TCNReducer,
-    "TCN-SIT": TCN_SIT_reduce,
-    "S2V":    Series2VecReducer,   # Series2Vec (global only, no SIT variant)
+    "PAA":    reduction.PAA_reduce,
+    "DFT":    reduction.DFT_reduce,
+    "DWT":    reduction.DWT_reduce,
+    "SVD":    reduction.SVD_reduce,
+    "PCA":    reduction.PCA_reduce,
+    "KPCA":   reduction.KPCA_reduce,
+    "Isomap": reduction.Isomap_reduce,
+    "AE":     reduction.AEReducer,
+    "AE-SIT": reduction.AE_SIT_reduce,
+    "CAE":     reduction.CAEReducer,
+    "CAE-SIT": reduction.CAE_SIT_reduce,
+    "TCN":     reduction.TCNReducer,
+    "TCN-SIT": reduction.TCN_SIT_reduce,
+    "S2V":    reduction.Series2VecReducer,
 }
 
 
