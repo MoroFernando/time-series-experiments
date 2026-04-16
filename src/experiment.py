@@ -180,6 +180,27 @@ def _print_progress(label: str, done: int, total: int, bar_len: int = 30) -> Non
 # Training & evaluation
 # ---------------------------------------------------------------------------
 
+def _configure_xla_cuda_dir() -> None:
+    """
+    Append --xla_gpu_cuda_data_dir to XLA_FLAGS so XLA can locate
+    libdevice.10.bc.  No-op if the flag is already present.
+    """
+    import glob
+    import sys
+
+    # Prefer the conda/venv prefix, then standard CUDA install paths.
+    candidates = [os.path.dirname(os.path.dirname(sys.executable))]
+    candidates += glob.glob("/usr/local/cuda")
+    candidates += sorted(glob.glob("/usr/local/cuda-[0-9]*"), reverse=True)
+
+    for base in candidates:
+        if os.path.exists(os.path.join(base, "nvvm", "libdevice", "libdevice.10.bc")):
+            existing = os.environ.get("XLA_FLAGS", "")
+            if "--xla_gpu_cuda_data_dir" not in existing:
+                os.environ["XLA_FLAGS"] = f"{existing} --xla_gpu_cuda_data_dir={base}".strip()
+            return
+
+
 def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
     """
     Worker function executed in a separate process for LITE (TensorFlow).
@@ -199,6 +220,8 @@ def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
         # some GPU/driver combinations, raising "Autotuner could not compile
         # any configs for HLO".
         os.environ.setdefault("XLA_FLAGS", "--xla_gpu_autotune_level=0")
+        # Point XLA to the CUDA toolkit so it can find libdevice.10.bc.
+        _configure_xla_cuda_dir()
 
         # On Windows, importing torch loads CUDA DLLs but does not call cuInit().
         # TensorFlow's CUDA back-end calls cuDeviceGet() before cuInit(), which
