@@ -24,6 +24,8 @@ Neural architectures
   AE  / AE-SIT   Dense (fully-connected) autoencoder
   CAE / CAE-SIT  1-D Convolutional autoencoder
   TCN / TCN-SIT  Temporal Convolutional Network autoencoder
+  S2V            Series2Vec self-supervised encoder (global only — no SIT
+                 variant, since similarity-based training requires pairs)
 
 Architecture highlights
 -----------------------
@@ -36,8 +38,13 @@ Architecture highlights
        1-channel latent, following the TCN-AE design for richer gradients.
 
   TCN  Residual blocks with exponentially dilated acausal convolutions and
-       weight normalisation, wrapped in an AE framework. 
+       weight normalisation, wrapped in an AE framework.
        Receptive field scales as O(2^n_levels).
+
+  S2V  Disjoint-CNN encoder (2 layers, 16 filters) trained with a pairwise
+       similarity-preserving loss in both time and frequency domains. Order-invariant Transformer attention over the
+       mini-batch enforces consistent representations for similar series.
+       No decoder — the encoder output IS the reduced series (length w).
 """
 import numpy as np
 import pywt
@@ -726,3 +733,301 @@ class TCNReducer(_GlobalReducer):
             N, w, self.n_filters, self.kernel_size,
             self.n_levels, self.latent_channels, self.dropout,
         )
+
+
+# ---------------------------------------------------------------------------
+# Neural — Series2Vec Encoder (S2V)
+# ---------------------------------------------------------------------------
+
+class _S2VEncoder(nn.Module):
+    """
+    Disjoint-CNN encoder for univariate time series (Series2Vec, Foumani et al. 2023).
+
+    Follows the paper's DisjoinEncoder adapted for single-channel input:
+      Conv1d(1 → emb_size, k=8) + BatchNorm + GELU   ← temporal features
+      Conv1d(emb_size → emb_size, k=5) + BatchNorm + GELU
+      AdaptiveAvgPool1d(w)                             ← temporal downsampling
+      Conv1d(emb_size → 1, k=1)                       ← channel collapse
+
+    Xavier initialisation on all Conv1d weights.
+
+    Input  : (B, 1, N)
+    Output : (B, w)
+    """
+
+    def __init__(self, latent_dim: int, emb_size: int = 16):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(1,        emb_size, kernel_size=8, padding=4), nn.BatchNorm1d(emb_size), nn.GELU(),
+            nn.Conv1d(emb_size, emb_size, kernel_size=5, padding=2), nn.BatchNorm1d(emb_size), nn.GELU(),
+        )
+        self.pool = nn.AdaptiveAvgPool1d(latent_dim)
+        self.proj = nn.Conv1d(emb_size, 1, kernel_size=1)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.xavier_uniform_(m.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.conv(x)     # (B, emb_size, N')  N' may differ by 1 due to even kernel
+        h = self.pool(h)     # (B, emb_size, w)
+        h = self.proj(h)     # (B, 1, w)
+        return h.squeeze(1)  # (B, w)
+
+
+class _S2VTrainer(nn.Module):
+    """
+    Full Series2Vec model used during pre-training only.
+
+    Matches the paper's Pretrain_forward (Section 3.2 and source code):
+      • time_enc / freq_enc  (_S2VEncoder): (B, 1, N) → (B, w)
+      • Linear projection w → D_MODEL (64, paper default)
+      • MultiheadAttention(Q=K=V) on shape (1, B, D_MODEL):
+          seq_len=1, batch=B — acts as a per-sample linear transform
+          with residual + LayerNorm, followed by FFN + LayerNorm
+      • torch.cdist(z, z) → (B, B) pairwise Euclidean distance matrix
+        returned directly (loss computed in the training loop)
+
+    After pre-training only time_enc is used at inference.
+
+    Fixed hyperparameters (paper Section 4.2):
+      D_MODEL = 64   (transformer encoding dimension d_m)
+      N_HEADS  = 8   (number of attention heads)
+    """
+
+    D_MODEL: int = 64
+    N_HEADS:  int = 8
+
+    def __init__(self, latent_dim: int, emb_size: int = 16):
+        super().__init__()
+        dm = self.D_MODEL
+        nh = self.N_HEADS
+
+        self.time_enc = _S2VEncoder(latent_dim, emb_size)
+        self.freq_enc = _S2VEncoder(latent_dim, emb_size)
+
+        self.time_proj = nn.Linear(latent_dim, dm)
+        self.freq_proj = nn.Linear(latent_dim, dm)
+
+        # MultiheadAttention: input (1, B, dm) → seq_len=1, batch=B
+        # Replicates paper's Pretrain_forward attention_layer call
+        self.t_attn  = nn.MultiheadAttention(dm, nh, dropout=0.1, batch_first=False)
+        self.f_attn  = nn.MultiheadAttention(dm, nh, dropout=0.1, batch_first=False)
+        self.t_norm1 = nn.LayerNorm(dm)
+        self.f_norm1 = nn.LayerNorm(dm)
+        self.t_ff    = nn.Sequential(nn.Linear(dm, dm * 4), nn.GELU(), nn.Linear(dm * 4, dm))
+        self.f_ff    = nn.Sequential(nn.Linear(dm, dm * 4), nn.GELU(), nn.Linear(dm * 4, dm))
+        self.t_norm2 = nn.LayerNorm(dm)
+        self.f_norm2 = nn.LayerNorm(dm)
+
+    def _branch(
+        self,
+        enc:   nn.Module,
+        proj:  nn.Module,
+        attn:  nn.Module,
+        norm1: nn.Module,
+        ff:    nn.Module,
+        norm2: nn.Module,
+        x:     torch.Tensor,
+    ):
+        """Encode → project → attention → FFN → pairwise distance matrix."""
+        r = enc(x)                            # (B, w)
+        h = proj(r)                           # (B, dm)
+        # Reshape to (1, B, dm): seq_len=1, batch=B
+        # This matches the paper's permute(2,0,1) on (B, dm, 1) GAP output
+        h_seq = h.unsqueeze(0)                # (1, B, dm)
+        att, _ = attn(h_seq, h_seq, h_seq)    # (1, B, dm)
+        att = norm1(att + h_seq)              # residual + LayerNorm
+        out = norm2(att + ff(att))            # FFN + residual + LayerNorm
+        z   = out.squeeze(0)                  # (B, dm)
+        d   = torch.cdist(z, z)              # (B, B) pairwise Euclidean distances
+        return r, d
+
+    def forward(
+        self,
+        x_t: torch.Tensor,   # (B, 1, N) — time domain
+        x_f: torch.Tensor,   # (B, 1, N) — |FFT| magnitude of x_t
+    ):
+        r_T, d_T = self._branch(
+            self.time_enc, self.time_proj, self.t_attn,
+            self.t_norm1, self.t_ff, self.t_norm2, x_t,
+        )
+        _,   d_F = self._branch(
+            self.freq_enc, self.freq_proj, self.f_attn,
+            self.f_norm1, self.f_ff, self.f_norm2, x_f,
+        )
+        return r_T, d_T, d_F   # (B, w), (B, B), (B, B)
+
+
+def _s2v_minmax(d: torch.Tensor) -> torch.Tensor:
+    """
+    Min-max normalise a distance vector or matrix to [0, 1].
+
+    Replicates Distance_normalizer() from the paper's source code.
+    Returns zeros if all distances are identical (degenerate batch).
+    """
+    lo, hi = d.min(), d.max()
+    if (hi - lo).abs() < 1e-8:
+        return torch.zeros_like(d)
+    return (d - lo) / (hi - lo)
+
+
+def _train_series2vec(
+    model: nn.Module,
+    X_t: torch.Tensor,   # (M, 1, N) — time series
+    X_f: torch.Tensor,   # (M, 1, N) — |FFT| magnitudes
+    epochs: int,
+    lr: float,
+    batch_size: int,
+) -> None:
+    """
+    Train the Series2Vec model with the similarity-preserving loss.
+
+    For each mini-batch of B series:
+      1. Encode both domains → pairwise distance matrices d_rep_T, d_rep_F (B, B).
+      2. Compute pairwise Euclidean distances in input space via torch.cdist.
+      3. Extract lower-triangular pairs (diagonal excluded; dist(x,x)=0 would
+         cause NaN gradients through sqrt).
+      4. Min-max normalise all four distance vectors to [0, 1].
+      5. Loss = smooth_L1(d_rep_T_norm, d_in_T_norm)
+               + smooth_L1(d_rep_F_norm, d_in_F_norm)
+      6. Clip gradients to max_norm=4.0.
+    """
+    from torch.utils.data import DataLoader, TensorDataset
+
+    batch_size = min(batch_size, len(X_t))
+    loader = DataLoader(
+        TensorDataset(X_t, X_f),
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=(len(X_t) > batch_size),
+    )
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    model.train()
+
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for x_t_batch, x_f_batch in loader:
+            optimizer.zero_grad()
+
+            _, d_rep_T, d_rep_F = model(x_t_batch, x_f_batch)  # (B,B), (B,B)
+
+            # ── Lower-triangular mask (exclude diagonal: dist(x,x)=0) ──────
+            B    = d_rep_T.shape[0]
+            mask = torch.tril(torch.ones(B, B, device=d_rep_T.device), diagonal=-1).bool()
+
+            # ── Pairwise distances in input space (torch.cdist is stable) ───
+            x_t_flat = x_t_batch.squeeze(1)                      # (B, N)
+            x_f_flat = x_f_batch.squeeze(1)                      # (B, N)
+            d_in_T   = torch.cdist(x_t_flat, x_t_flat)           # (B, B)
+            d_in_F   = torch.cdist(x_f_flat, x_f_flat)           # (B, B)
+
+            # ── Extract lower-triangular pairs → 1-D vectors ────────────────
+            d_rep_T_vec = torch.masked_select(d_rep_T, mask)     # (B*(B-1)/2,)
+            d_rep_F_vec = torch.masked_select(d_rep_F, mask)
+            d_in_T_vec  = torch.masked_select(d_in_T,  mask)
+            d_in_F_vec  = torch.masked_select(d_in_F,  mask)
+
+            # ── Min-max normalise to [0, 1] ──────────────────────────────────
+            d_rep_T_vec = _s2v_minmax(d_rep_T_vec)
+            d_rep_F_vec = _s2v_minmax(d_rep_F_vec)
+            d_in_T_vec  = _s2v_minmax(d_in_T_vec)
+            d_in_F_vec  = _s2v_minmax(d_in_F_vec)
+
+            # ── Similarity-preserving loss (L_total = L_sim_T + L_sim_F) ────
+            loss = (
+                F.smooth_l1_loss(d_rep_T_vec, d_in_T_vec)
+                + F.smooth_l1_loss(d_rep_F_vec, d_in_F_vec)
+            )
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=4.0)
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        _print_train_progress(epoch + 1, epochs, epoch_loss / max(len(loader), 1))
+    print()
+
+
+class Series2VecReducer:
+    """
+    Series2Vec — global self-supervised dimensionality reduction.
+
+    Trains a dual-encoder (temporal + spectral domains) with a pairwise
+    similarity-preserving loss. After
+    training, only the temporal encoder is used for inference: it maps
+    each univariate channel from N timepoints to w timepoints.
+
+    Key properties
+    --------------
+    • No decoder, no reconstruction loss — the encoder is trained to
+      *preserve distance structure*, not to reconstruct the input.
+    • No data augmentation — similarity is computed directly between raw
+      series pairs (Euclidean distance, simplified from Soft-DTW).
+    • Order-invariant attention during training:
+      each representation is refined via attention + FFN before distances
+      are computed, allowing the training signal to be computed over the
+      full B×B pairwise structure of the mini-batch.
+    • Fixed d_model=64 and n_heads=8.
+    • Only a global mode is provided: pairwise similarity requires ≥ 2
+      series, so per-series (SIT) training is not applicable.
+    """
+
+    def __init__(
+        self,
+        emb_size:   int   = 16,     # CNN filter count (paper default: 16)
+        epochs:     int   = 100,    # pre-training epochs (paper: 100)
+        lr:         float = 0.001,  # Adam learning rate
+        batch_size: int   = 64,     # mini-batch size (paper: 64)
+    ):
+        self.emb_size   = emb_size
+        self.epochs     = epochs
+        self.lr         = lr
+        self.batch_size = batch_size
+        self._model: _S2VTrainer | None = None
+        self._w: int | None = None
+
+    # ---- public API (mirrors _GlobalReducer) ----------------------------
+
+    def fit_transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        if w >= N:
+            raise ValueError("w must be smaller than series length.")
+
+        device = _get_device()
+        X_flat = X.reshape(-1, N).astype(np.float32)                  # (M, N)
+        X_t    = torch.from_numpy(X_flat).unsqueeze(1).to(device)     # (M, 1, N)
+        X_f    = self._fft_tensor(X_flat, device)                     # (M, 1, N)
+
+        self._model = _S2VTrainer(w, self.emb_size).to(device)
+        self._w = w
+        _train_series2vec(self._model, X_t, X_f, self.epochs, self.lr, self.batch_size)
+
+        return self._encode(X, device)
+
+    def transform(self, X: np.ndarray, w: int) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("Call fit_transform before transform.")
+        if w != self._w:
+            raise ValueError(f"w={w} does not match fitted w={self._w}.")
+        return self._encode(X, _get_device())
+
+    # ---- internals -------------------------------------------------------
+
+    @staticmethod
+    def _fft_tensor(X_flat: np.ndarray, device: torch.device) -> torch.Tensor:
+        """Compute |FFT| magnitude spectrum → (M, 1, N) tensor on device."""
+        X_freq = np.abs(np.fft.fft(X_flat, axis=1)).astype(np.float32)
+        return torch.from_numpy(X_freq).unsqueeze(1).to(device)
+
+    def _encode(self, X: np.ndarray, device: torch.device) -> np.ndarray:
+        n_samples, n_channels, N = X.shape
+        X_flat = X.reshape(-1, N).astype(np.float32)
+        X_t    = torch.from_numpy(X_flat).unsqueeze(1).to(device)  # (M, 1, N)
+
+        self._model.eval()
+        with torch.no_grad():
+            r_T = self._model.time_enc(X_t)   # (M, w) — time encoder only
+
+        reduced_flat = r_T.cpu().numpy()       # (M, w)
+        reduced_flat = _sign_correct_batch(reduced_flat, X_flat, self._w)
+        return reduced_flat.reshape(n_samples, n_channels, self._w)

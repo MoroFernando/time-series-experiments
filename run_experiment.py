@@ -42,6 +42,7 @@ from src.reduction import (
     CAE_SIT_reduce,
     TCNReducer,
     TCN_SIT_reduce,
+    Series2VecReducer,
 )
 
 ALL_REDUCTION_METHODS = {
@@ -58,6 +59,7 @@ ALL_REDUCTION_METHODS = {
     "CAE-SIT": CAE_SIT_reduce,
     "TCN":     TCNReducer,
     "TCN-SIT": TCN_SIT_reduce,
+    "S2V":    Series2VecReducer,   # Series2Vec (global only, no SIT variant)
 }
 
 
