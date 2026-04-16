@@ -9,7 +9,7 @@ from aeon.classification.convolution_based import RocketClassifier
 from aeon.classification.deep_learning import LITETimeClassifier
 from aeon.classification.dictionary_based import MUSE
 from aeon.classification.distance_based import KNeighborsTimeSeriesClassifier
-from aeon.classification.feature_based import Catch22Classifier, FreshPRINCEClassifier
+from aeon.classification.feature_based import Catch22Classifier
 from aeon.classification.interval_based import QUANTClassifier
 
 
@@ -33,7 +33,6 @@ def get_classifiers(random_state: int = 1) -> dict:
     LITE             Lightweight Inception-based deep classifier (TensorFlow).
     MUSE             WEASEL+MUSE: multivariate dictionary / bag-of-patterns with
                      SFA words and logistic regression (chi2 feature selection).
-    FreshPRINCE      tsfresh features (comprehensive) + rotation forest.
     """
     return {
         "Rocket":        RocketClassifier(random_state=random_state, n_jobs=-1),
@@ -47,5 +46,4 @@ def get_classifiers(random_state: int = 1) -> dict:
                          ),
         "LITE":          LITETimeClassifier(random_state=random_state),
         "MUSE":          MUSE(random_state=random_state, n_jobs=-1),
-        "FreshPRINCE":   FreshPRINCEClassifier(random_state=random_state, n_jobs=-1)
     }

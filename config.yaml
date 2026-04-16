@@ -26,12 +26,11 @@ datasets:
 
 classifiers:
   - Rocket
-  # - Catch22
+  - Catch22
   - QUANT
   - 1NN-DTW
   - LITE
   - MUSE
-  - FreshPRINCE
 
 reduction_methods:
   - PAA
