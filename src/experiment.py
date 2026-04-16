@@ -195,6 +195,15 @@ def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
         os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
         os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
         os.environ.setdefault("GLOG_minloglevel",       "3")
+
+        # On Windows, importing torch loads CUDA DLLs but does not call cuInit().
+        # TensorFlow's CUDA back-end calls cuDeviceGet() before cuInit(), which
+        # raises CUDA_ERROR_NOT_INITIALIZED in the subprocess.  Calling
+        # torch.cuda.init() here ensures cuInit(0) runs before TF touches CUDA.
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.init()
+
         import tensorflow as tf
         from sklearn.metrics import accuracy_score
 
