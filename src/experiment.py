@@ -5,7 +5,7 @@ import gc
 import os
 import sys
 import time
-from multiprocessing import Process, Queue
+from multiprocessing import get_context
 
 import numpy as np
 import pandas as pd
@@ -296,8 +296,12 @@ def _run_lite_in_subprocess(
     X_test: np.ndarray,
     y_test: np.ndarray,
 ) -> tuple[float, float, float]:
-    q = Queue()
-    p = Process(target=_lite_worker, args=(clf, X_train, y_train, X_test, y_test, q))
+    # Use 'spawn' explicitly so the child process starts fresh without
+    # inheriting the parent's CUDA context (avoids "Cannot re-initialize
+    # CUDA in forked subprocess" when the default start method is 'fork').
+    ctx = get_context("spawn")
+    q = ctx.Queue()
+    p = ctx.Process(target=_lite_worker, args=(clf, X_train, y_train, X_test, y_test, q))
     p.start()
     result = q.get()
     p.join()
