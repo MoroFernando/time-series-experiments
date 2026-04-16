@@ -180,27 +180,6 @@ def _print_progress(label: str, done: int, total: int, bar_len: int = 30) -> Non
 # Training & evaluation
 # ---------------------------------------------------------------------------
 
-def _configure_xla_cuda_dir() -> None:
-    """
-    Append --xla_gpu_cuda_data_dir to XLA_FLAGS so XLA can locate
-    libdevice.10.bc.  No-op if the flag is already present.
-    """
-    import glob
-    import sys
-
-    # Prefer the conda/venv prefix, then standard CUDA install paths.
-    candidates = [os.path.dirname(os.path.dirname(sys.executable))]
-    candidates += glob.glob("/usr/local/cuda")
-    candidates += sorted(glob.glob("/usr/local/cuda-[0-9]*"), reverse=True)
-
-    for base in candidates:
-        if os.path.exists(os.path.join(base, "nvvm", "libdevice", "libdevice.10.bc")):
-            existing = os.environ.get("XLA_FLAGS", "")
-            if "--xla_gpu_cuda_data_dir" not in existing:
-                os.environ["XLA_FLAGS"] = f"{existing} --xla_gpu_cuda_data_dir={base}".strip()
-            return
-
-
 def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
     """
     Worker function executed in a separate process for LITE (TensorFlow).
@@ -213,20 +192,20 @@ def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
         import os
         import warnings
         import time
+        
+        # --- CONFIGURAÇÃO DE AMBIENTE ---
         os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
         os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
         os.environ.setdefault("GLOG_minloglevel",       "3")
-        # Disable XLA GPU autotuner — it fails to compile kernel configs on
-        # some GPU/driver combinations, raising "Autotuner could not compile
-        # any configs for HLO".
-        os.environ.setdefault("XLA_FLAGS", "--xla_gpu_autotune_level=0")
-        # Point XLA to the CUDA toolkit so it can find libdevice.10.bc.
-        _configure_xla_cuda_dir()
 
-        # On Windows, importing torch loads CUDA DLLs but does not call cuInit().
-        # TensorFlow's CUDA back-end calls cuDeviceGet() before cuInit(), which
-        # raises CUDA_ERROR_NOT_INITIALIZED in the subprocess.  Calling
-        # torch.cuda.init() here ensures cuInit(0) runs before TF touches CUDA.
+        # Recupera o caminho do seu ambiente Conda
+        conda_env_path = os.environ.get('CONDA_PREFIX', '/home/fernando.moro/.conda/envs/pibic')
+        
+        # Concatenamos a flag de autotune com o novo diretório do CUDA
+        # O XLA lerá o link simbólico que criamos em nvvm/libdevice/
+        xla_flags = f"--xla_gpu_autotune_level=0 --xla_gpu_cuda_data_dir={conda_env_path}"
+        os.environ["XLA_FLAGS"] = xla_flags
+
         import torch
         if torch.cuda.is_available():
             torch.cuda.init()
