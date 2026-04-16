@@ -14,6 +14,87 @@ from sklearn.metrics import accuracy_score
 
 
 # ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def _format_duration(seconds: float) -> str:
+    """Convert a duration in seconds to a human-readable string (e.g. '2h 03m 45s')."""
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+def _print_clf_status(clf_name: str, idx: int, total: int, status: str) -> None:
+    """
+    Overwrite the current line with a classifier progress indicator.
+
+    Uses a dot-based style (▷ ··· [N/M]) to visually differ from the
+    block-bar used for reduction/training progress.
+    """
+    dots = "·" * 20
+    label = f"{clf_name:<18}"
+    sys.stdout.write(f"\r  ▷  {label} {dots}  [{idx}/{total}]  {status}      ")
+    sys.stdout.flush()
+
+
+def _print_clf_done(
+    clf_name: str,
+    idx: int,
+    total: int,
+    acc: float,
+    train_t: float,
+    test_t: float,
+) -> None:
+    """Print a completed-classifier line ending with a newline."""
+    label = f"{clf_name:<18}"
+    sys.stdout.write(
+        f"\r  ✓  {label} acc={acc:.4f}  train={train_t}s  pred={test_t}s  [{idx}/{total}]\n"
+    )
+    sys.stdout.flush()
+
+
+def _print_clf_error(clf_name: str, idx: int, total: int, err: Exception) -> None:
+    """Print a failed-classifier line ending with a newline."""
+    label = f"{clf_name:<18}"
+    sys.stdout.write(
+        f"\r  ✗  {label} FAILED: {err}  [{idx}/{total}]\n"
+    )
+    sys.stdout.flush()
+
+
+def _print_eta(
+    completed: int,
+    total: int,
+    durations: list[float],
+    wall_start: float,
+) -> None:
+    """
+    Print an overall experiment ETA line after each combination completes.
+
+    Uses the mean duration of completed combinations as the per-combo estimate.
+    """
+    elapsed = time.time() - wall_start
+    remaining = total - completed
+    if completed > 0 and remaining > 0:
+        avg = elapsed / completed
+        eta_s = avg * remaining
+        eta_str = _format_duration(eta_s)
+    else:
+        eta_str = "—"
+    elapsed_str = _format_duration(elapsed)
+    pct = completed / total if total else 0
+    print(
+        f"  ⏱  Combination {completed}/{total} done  |  "
+        f"elapsed={elapsed_str}  |  ETA≈{eta_str}  ({pct:.0%})"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Reduction
 # ---------------------------------------------------------------------------
 
@@ -144,6 +225,8 @@ def train_and_evaluate(
     y_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
+    clf_idx: int = 0,
+    clf_total: int = 0,
 ) -> tuple[float, float, float]:
     """
     Fit a classifier and evaluate it.
@@ -151,20 +234,26 @@ def train_and_evaluate(
     LITE is run in an isolated subprocess so TensorFlow releases all GPU/RAM
     memory when the process exits. All other classifiers run in-process.
 
+    Parameters
+    ----------
+    clf_idx / clf_total : position in the classifier loop (for progress display).
+        Pass 0 for both to suppress the indexed display.
+
     Returns
     -------
     accuracy : float
     train_time_s : wall-clock seconds for clf.fit()
     test_time_s : wall-clock seconds for clf.predict()
     """
-    print(f"  [clf] Training {clf_name}...")
+    idx, total = clf_idx, clf_total
+    _print_clf_status(clf_name, idx, total, "fitting …")
 
     if clf_name == "LITE":
         acc, train_time, test_time = _run_lite_in_subprocess(clf, X_train, y_train, X_test, y_test)
     else:
         acc, train_time, test_time = _run_inprocess(clf, X_train, y_train, X_test, y_test)
 
-    print(f"  [clf] {clf_name} — accuracy={acc:.4f}, train={train_time}s, test={test_time}s")
+    _print_clf_done(clf_name, idx, total, acc, train_time, test_time)
     return acc, train_time, test_time
 
 
@@ -253,6 +342,15 @@ def run_experiment(
     from .datasets import load_and_normalize
     from .metrics import compute_neighborhood_metrics
 
+    # ------------------------------------------------------------------
+    # Pre-compute total number of (dataset × combination) pairs for ETA.
+    # A "combination" is one classifier batch: either the original run or
+    # one (method, retention_rate) reduced run.
+    # ------------------------------------------------------------------
+    total_combos = len(datasets) * (1 + len(reduction_methods) * len(retention_rates))
+    completed_combos = 0
+    wall_start = time.time()
+
     for dataset in datasets:
         try:
             X_train, y_train, X_test, y_test = load_and_normalize(dataset)
@@ -261,9 +359,12 @@ def run_experiment(
             print(f"\n{'='*60}")
             print(f"Dataset: {dataset} | Original ({X_train.shape[2]} timepoints)")
             print(f"{'='*60}")
-            for clf_name, clf in classifiers_factory().items():
+            clfs = classifiers_factory()
+            clf_total = len(clfs)
+            for clf_idx, (clf_name, clf) in enumerate(clfs.items(), start=1):
                 acc, train_t, test_t = train_and_evaluate(
-                    clf_name, clf, X_train, y_train, X_test, y_test
+                    clf_name, clf, X_train, y_train, X_test, y_test,
+                    clf_idx=clf_idx, clf_total=clf_total,
                 )
                 append_result(
                     {
@@ -279,6 +380,8 @@ def run_experiment(
                     },
                     output_file,
                 )
+            completed_combos += 1
+            _print_eta(completed_combos, total_combos, [], wall_start)
 
             # --- Reduced ---
             for method_name, method in reduction_methods.items():
@@ -292,6 +395,8 @@ def run_experiment(
                         )
                     except Exception as e:
                         print(f"[error] Reduction failed: {e}")
+                        completed_combos += 1
+                        _print_eta(completed_combos, total_combos, [], wall_start)
                         continue
 
                     # Neighborhood preservation — computed once per (method, rate, k)
@@ -315,13 +420,16 @@ def run_experiment(
                             print(f"  [metrics] k={k} Failed: {e}")
 
                     # Classification — one row per classifier
-                    for clf_name, clf in classifiers_factory().items():
+                    clfs = classifiers_factory()
+                    clf_total = len(clfs)
+                    for clf_idx, (clf_name, clf) in enumerate(clfs.items(), start=1):
                         try:
                             acc, train_t, test_t = train_and_evaluate(
-                                clf_name, clf, X_tr, y_train, X_te, y_test
+                                clf_name, clf, X_tr, y_train, X_te, y_test,
+                                clf_idx=clf_idx, clf_total=clf_total,
                             )
                         except Exception as e:
-                            print(f"[error] Classifier {clf_name} failed: {e}")
+                            _print_clf_error(clf_name, clf_idx, clf_total, e)
                             acc, train_t, test_t = float("nan"), float("nan"), float("nan")
 
                         append_result(
@@ -343,6 +451,9 @@ def run_experiment(
                     torch.cuda.empty_cache()
                     gc.collect()
 
+                    completed_combos += 1
+                    _print_eta(completed_combos, total_combos, [], wall_start)
+
             del X_train, X_test, y_train, y_test
             gc.collect()
 
@@ -350,4 +461,8 @@ def run_experiment(
             print(f"[error] Dataset '{dataset}' failed: {e}")
             continue
 
+    elapsed_total = time.time() - wall_start
+    print(f"\n{'='*60}")
+    print(f"Experiment complete — total time: {_format_duration(elapsed_total)}")
+    print(f"{'='*60}")
     return pd.read_csv(output_file)
