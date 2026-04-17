@@ -189,22 +189,8 @@ def _lite_worker(clf, X_train, y_train, X_test, y_test, queue):
     process exits.
     """
     try:
-        import os
         import warnings
         import time
-        
-        # --- CONFIGURAÇÃO DE AMBIENTE ---
-        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL",  "3")
-        os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
-        os.environ.setdefault("GLOG_minloglevel",       "3")
-
-        # Recupera o caminho do seu ambiente Conda
-        conda_env_path = os.environ.get('CONDA_PREFIX', '/home/fernando.moro/.conda/envs/pibic')
-        
-        # Concatenamos a flag de autotune com o novo diretório do CUDA
-        # O XLA lerá o link simbólico que criamos em nvvm/libdevice/
-        xla_flags = f"--xla_gpu_autotune_level=0 --xla_gpu_cuda_data_dir={conda_env_path}"
-        os.environ["XLA_FLAGS"] = xla_flags
 
         import torch
         if torch.cuda.is_available():
