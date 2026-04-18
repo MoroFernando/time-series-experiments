@@ -74,7 +74,11 @@ def AE_SIT_reduce(
     model.eval()
     with torch.no_grad():
         _, latent = model(x)
-    return sign_correct(latent.view(-1).cpu().numpy(), series, w)
+    result = sign_correct(latent.view(-1).cpu().numpy(), series, w)
+    del model, x, latent
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return result
 
 
 class AEReducer(GlobalReducer):

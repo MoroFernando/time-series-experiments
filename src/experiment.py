@@ -138,6 +138,8 @@ def reduce_dataset(
         print(f"  Train: done ({len(X_train)} samples)")
         X_test_red = method.transform(X_test, w)
         print(f"  Test : done ({len(X_test)} samples)")
+        if hasattr(method, "cleanup"):
+            method.cleanup()
     else:
         X_train_red = _apply_reduction(method, X_train, w, label="Train")
         X_test_red = _apply_reduction(method, X_test, w, label="Test ")

@@ -13,6 +13,8 @@ os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("GLOG_minloglevel",       "3")
 
 import argparse
+import datetime
+import sys
 
 import torch
 import yaml
@@ -20,6 +22,50 @@ import yaml
 from src.classifiers import get_classifiers
 from src.experiment import run_experiment
 from src import reduction
+
+
+class _TeeLogger:
+    """Mirrors a stream to both the terminal and a log file.
+
+    Progress-bar lines (written with \\r) are collapsed: only the final
+    state of each overwritten line is saved to the log file, keeping it
+    human-readable without thousands of intermediate bar frames.
+    """
+
+    def __init__(self, stream, log_file):
+        self._stream = stream
+        self._log = log_file
+        self._buf = ""
+
+    def _flush_line(self, line: str) -> None:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._log.write(f"[{ts}] {line}\n")
+        self._log.flush()
+
+    def write(self, text: str) -> None:
+        self._stream.write(text)
+        self._stream.flush()
+        for ch in text:
+            if ch == "\r":
+                self._buf = ""
+            elif ch == "\n":
+                self._flush_line(self._buf)
+                self._buf = ""
+            else:
+                self._buf += ch
+
+    def flush(self) -> None:
+        self._stream.flush()
+        self._log.flush()
+
+    def fileno(self):
+        return self._stream.fileno()
+
+    def isatty(self) -> bool:
+        try:
+            return self._stream.isatty()
+        except AttributeError:
+            return False
 
 ALL_REDUCTION_METHODS = {
     "PAA":    reduction.PAA_reduce,
@@ -103,11 +149,25 @@ def main():
     def classifiers_factory():
         return {k: v for k, v in get_classifiers(random_state).items() if k in selected_classifiers}
 
-    os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+    out_dir = os.path.dirname(output_file) or "."
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Mirror all output (stdout + stderr) to experiment.log.
+    # Progress-bar lines (\\r) are collapsed so the file stays readable.
+    log_path = os.path.join(out_dir, "experiment.log")
+    _log_file = open(log_path, "a", encoding="utf-8")
+    _log_file.write(f"\n{'='*60}\n")
+    _log_file.write(f"Run started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    _log_file.write(f"Config: {args.config}\n")
+    _log_file.write(f"{'='*60}\n")
+    _log_file.flush()
+    sys.stdout = _TeeLogger(sys.__stdout__, _log_file)
+    sys.stderr = _TeeLogger(sys.__stderr__, _log_file)
 
     print("=" * 60)
     print("Dimensionality Reduction Experiments")
     print(f"  Config          : {args.config}")
+    print(f"  Log             : {log_path}")
     print(f"  Datasets        : {datasets}")
     print(f"  Classifiers     : {selected_classifiers}")
     print(f"  Methods         : {list(reduction_methods)}")
@@ -126,6 +186,11 @@ def main():
         neighborhood_file=neighborhood_file,
         neighborhood_ks=neighborhood_ks,
     )
+
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    _log_file.write(f"Run finished: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    _log_file.close()
 
 if __name__ == "__main__":
     main()

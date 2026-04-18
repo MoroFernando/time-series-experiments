@@ -133,6 +133,9 @@ class GlobalReducer:
         train_autoencoder_batched(
             self._model, X_tensor, self.epochs, self.lr, self.batch_size
         )
+        del X_tensor
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return self._encode(X, device)
 
     def transform(self, X: np.ndarray, w: int) -> np.ndarray:
@@ -155,8 +158,16 @@ class GlobalReducer:
 
         # Works for both (B, w) [dense] and (B, 1, w) [conv/tcn]
         reduced_flat = latent.cpu().numpy().reshape(-1, self._w)
+        del X_tensor, latent
         reduced_flat = sign_correct_batch(reduced_flat, X_flat, self._w)
         return reduced_flat.reshape(n_samples, n_channels, self._w)
+
+    def cleanup(self) -> None:
+        """Release model weights and GPU memory after the reducer is no longer needed."""
+        self._model = None
+        self._w = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _to_tensor(self, X_flat: np.ndarray, device: torch.device) -> torch.Tensor:
         """Converts numpy array to a tensor, adding a channel dimension if needed."""
