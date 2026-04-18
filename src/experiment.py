@@ -12,6 +12,13 @@ import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score
 
+try:
+    import psutil as _psutil
+    _PSUTIL_AVAILABLE = True
+    _PROCESS = _psutil.Process()
+except ImportError:
+    _PSUTIL_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Formatting helpers
@@ -67,6 +74,22 @@ def _print_clf_error(clf_name: str, idx: int, total: int, err: Exception) -> Non
     sys.stdout.flush()
 
 
+def _mem_stats() -> str:
+    """Return a compact string with process RAM and (optionally) GPU memory."""
+    parts = []
+    if _PSUTIL_AVAILABLE:
+        rss_gb = _PROCESS.memory_info().rss / 1024 ** 3
+        total_gb = _psutil.virtual_memory().total / 1024 ** 3
+        pct = rss_gb / total_gb * 100
+        parts.append(f"RAM={rss_gb:.1f}/{total_gb:.0f}GB ({pct:.0f}%)")
+    if torch.cuda.is_available():
+        alloc_gb = torch.cuda.memory_allocated() / 1024 ** 3
+        total_vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+        pct_gpu = alloc_gb / total_vram * 100
+        parts.append(f"GPU={alloc_gb:.1f}/{total_vram:.0f}GB ({pct_gpu:.0f}%)")
+    return "  |  ".join(parts)
+
+
 def _print_eta(
     completed: int,
     total: int,
@@ -88,9 +111,11 @@ def _print_eta(
         eta_str = "—"
     elapsed_str = _format_duration(elapsed)
     pct = completed / total if total else 0
+    mem = _mem_stats()
+    mem_part = f"  |  {mem}" if mem else ""
     print(
         f"  ⏱  Combination {completed}/{total} done  |  "
-        f"elapsed={elapsed_str}  |  ETA≈{eta_str}  ({pct:.0%})"
+        f"elapsed={elapsed_str}  |  ETA≈{eta_str}  ({pct:.0%}){mem_part}"
     )
 
 
