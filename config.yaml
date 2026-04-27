@@ -2,15 +2,15 @@
 # Comment/uncomment entries to include or exclude them from the run.
 
 datasets:
-  - ACSF1
-  - CinCECGTorso
-  - EOGHorizontalSignal
-  - EOGVerticalSignal
-  - EthanolLevel
-  - HandOutlines
-  - Haptics
-  - HouseTwenty
-  - InlineSkate
+  # - ACSF1
+  # - CinCECGTorso
+  # - EOGHorizontalSignal
+  # - EOGVerticalSignal
+  # - EthanolLevel
+  # - HandOutlines
+  # - Haptics
+  # - HouseTwenty
+  # - InlineSkate
   - Mallat
   - MixedShapesRegularTrain
   - MixedShapesSmallTrain
