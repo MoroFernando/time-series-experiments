@@ -11,7 +11,7 @@ datasets:
   # - Haptics
   # - HouseTwenty
   # - InlineSkate
-  - Mallat
+  # - Mallat
   - MixedShapesRegularTrain
   - MixedShapesSmallTrain
   - Phoneme
