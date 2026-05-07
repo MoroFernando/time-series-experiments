@@ -69,6 +69,7 @@ class _TeeLogger:
 
 ALL_REDUCTION_METHODS = {
     "PAA":    reduction.PAA_reduce,
+    "PAA-OPTIMIZED": reduction.PAA_optimized_reduce,
     "DFT":    reduction.DFT_reduce,
     "DWT":    reduction.DWT_reduce,
     "SVD":    reduction.SVD_reduce,

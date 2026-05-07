@@ -1,6 +1,7 @@
 """Statistical dimensionality reduction methods."""
 import numpy as np
 import pywt
+from pyts.approximation import PiecewiseAggregateApproximation
 
 
 def PAA_reduce(series: np.ndarray, w: int) -> np.ndarray:
@@ -17,6 +18,24 @@ def PAA_reduce(series: np.ndarray, w: int) -> np.ndarray:
     idx = np.floor(np.linspace(0, len(series), w + 1, endpoint=True)).astype(int)
     return np.array([np.mean(series[idx[i]:idx[i+1]]) for i in range(w)])
 
+def PAA_optimized_reduce(series: np.ndarray, w: int) -> np.ndarray:
+    """
+    Piecewise Aggregate Approximation (PAA) - Adaptada para pyts.
+    
+    Transforma a série original para o formato esperado pelo pyts (2D),
+    aplica a redução para 'w' segmentos e retorna o array 1D resultante.
+    """
+    series = np.asarray(series)
+    
+    if series.size == 0:
+        return np.full(w, np.nan)
+    
+    paa = PiecewiseAggregateApproximation(output_size=w)
+
+    series_2d = series.reshape(1, -1)
+    series_reduced = paa.transform(series_2d)
+
+    return series_reduced[0]
 
 def DFT_reduce(series: np.ndarray, w: int) -> np.ndarray:
     """

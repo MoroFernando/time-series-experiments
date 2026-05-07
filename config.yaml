@@ -2,16 +2,16 @@
 # Comment/uncomment entries to include or exclude them from the run.
 
 datasets:
-  # - ACSF1
-  # - CinCECGTorso
-  # - EOGHorizontalSignal
-  # - EOGVerticalSignal
-  # - EthanolLevel
-  # - HandOutlines
-  # - Haptics
-  # - HouseTwenty
-  # - InlineSkate
-  # - Mallat
+  - ACSF1
+  - CinCECGTorso
+  - EOGHorizontalSignal
+  - EOGVerticalSignal
+  - EthanolLevel
+  - HandOutlines
+  - Haptics
+  - HouseTwenty
+  - InlineSkate
+  - Mallat
   - MixedShapesRegularTrain
   - MixedShapesSmallTrain
   - Phoneme
@@ -33,20 +33,21 @@ classifiers:
   - MUSE
 
 reduction_methods:
-  - PAA
-  - DFT
-  - DWT
-  - SVD
-  - PCA
-  - KPCA
-  - Isomap
-  - AE
-  - AE-SIT
-  - CAE
-  - CAE-SIT
-  - TCN
-  - TCN-SIT
-  - S2V
+  # - PAA
+  - PAA-OPTIMIZED
+  # - DFT
+  # - DWT
+  # - SVD
+  # - PCA
+  # - KPCA
+  # - Isomap
+  # - AE
+  # - AE-SIT
+  # - CAE
+  # - CAE-SIT
+  # - TCN
+  # - TCN-SIT
+  # - S2V
 
 retention_rates:
   - 0.85
