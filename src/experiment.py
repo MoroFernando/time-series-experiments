@@ -388,32 +388,32 @@ def run_experiment(
             X_train, y_train, X_test, y_test = load_and_normalize(dataset)
 
             # --- Original (no reduction) ---
-            print(f"\n{'='*60}")
-            print(f"Dataset: {dataset} | Original ({X_train.shape[2]} timepoints)")
-            print(f"{'='*60}")
-            clfs = classifiers_factory()
-            clf_total = len(clfs)
-            for clf_idx, (clf_name, clf) in enumerate(clfs.items(), start=1):
-                acc, train_t, test_t = train_and_evaluate(
-                    clf_name, clf, X_train, y_train, X_test, y_test,
-                    clf_idx=clf_idx, clf_total=clf_total,
-                )
-                append_result(
-                    {
-                        "dataset": dataset,
-                        "classifier": clf_name,
-                        "reduction_method": None,
-                        "retention_rate": None,
-                        "series_size": X_train.shape[2],
-                        "accuracy": acc,
-                        "train_time_s": train_t,
-                        "test_time_s": test_t,
-                        "reduction_time_s": 0,
-                    },
-                    output_file,
-                )
-            completed_combos += 1
-            _print_eta(completed_combos, total_combos, [], wall_start)
+            # print(f"\n{'='*60}")
+            # print(f"Dataset: {dataset} | Original ({X_train.shape[2]} timepoints)")
+            # print(f"{'='*60}")
+            # clfs = classifiers_factory()
+            # clf_total = len(clfs)
+            # for clf_idx, (clf_name, clf) in enumerate(clfs.items(), start=1):
+            #     acc, train_t, test_t = train_and_evaluate(
+            #         clf_name, clf, X_train, y_train, X_test, y_test,
+            #         clf_idx=clf_idx, clf_total=clf_total,
+            #     )
+            #     append_result(
+            #         {
+            #             "dataset": dataset,
+            #             "classifier": clf_name,
+            #             "reduction_method": None,
+            #             "retention_rate": None,
+            #             "series_size": X_train.shape[2],
+            #             "accuracy": acc,
+            #             "train_time_s": train_t,
+            #             "test_time_s": test_t,
+            #             "reduction_time_s": 0,
+            #         },
+            #         output_file,
+            #     )
+            # completed_combos += 1
+            # _print_eta(completed_combos, total_combos, [], wall_start)
 
             # --- Reduced ---
             for method_name, method in reduction_methods.items():
