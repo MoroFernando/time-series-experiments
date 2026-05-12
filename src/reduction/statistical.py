@@ -27,7 +27,7 @@ def PAA_optimized_reduce(series: np.ndarray, w: int) -> np.ndarray:
     if series.size == 0:
         return np.full(w, np.nan)
     
-    paa = PiecewiseAggregateApproximation(output_size=w, window_size=None)
+    paa = PiecewiseAggregateApproximation(output_size=w, window_size=None, overlapping=False)
     series_reduced = paa.transform(series.reshape(1, -1))
 
     return series_reduced[0]
