@@ -20,20 +20,15 @@ def PAA_reduce(series: np.ndarray, w: int) -> np.ndarray:
 
 def PAA_optimized_reduce(series: np.ndarray, w: int) -> np.ndarray:
     """
-    Piecewise Aggregate Approximation (PAA) - Adaptada para pyts.
-    
-    Transforma a série original para o formato esperado pelo pyts (2D),
-    aplica a redução para 'w' segmentos e retorna o array 1D resultante.
+    Piecewise Aggregate Approximation (PAA) - pyts.
     """
     series = np.asarray(series)
     
     if series.size == 0:
         return np.full(w, np.nan)
     
-    paa = PiecewiseAggregateApproximation(output_size=w)
-
-    series_2d = series.reshape(1, -1)
-    series_reduced = paa.transform(series_2d)
+    paa = PiecewiseAggregateApproximation(output_size=w, window_size=None)
+    series_reduced = paa.transform(series.reshape(1, -1))
 
     return series_reduced[0]
 
@@ -90,9 +85,6 @@ def SVD_reduce(series: np.ndarray, w: int, window: int = 10) -> np.ndarray:
     top w singular values, reconstructs, and subsamples to length w.
     """
     N = len(series)
-    if N < window:
-        # If series is shorter than window, use PAA as a fallback
-        return PAA_reduce(series, w)
         
     X = np.array([series[i : i + window] for i in range(N - window + 1)])
     U, S, VT = np.linalg.svd(X, full_matrices=False)
