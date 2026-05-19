@@ -34,7 +34,7 @@ classifiers:
 
 reduction_methods:
   # - PAA
-  - PAA-OPTIMIZED
+  # - PAA-OPTIMIZED
   # - DFT
   # - DWT
   # - SVD
@@ -48,6 +48,7 @@ reduction_methods:
   # - TCN
   # - TCN-SIT
   # - S2V
+  - UniformDownsampling
 
 retention_rates:
   - 0.85

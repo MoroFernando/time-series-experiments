@@ -50,7 +50,6 @@ def DFT_reduce(series: np.ndarray, w: int) -> np.ndarray:
     approx = np.fft.ifft(X_reduced).real
     return approx[np.linspace(0, N - 1, w).astype(int)]
 
-
 def DWT_reduce(series: np.ndarray, w: int, wavelet: str = "db6", level: int = 3) -> np.ndarray:
     """
     Discrete Wavelet Transform (DWT) reduction.
@@ -76,7 +75,6 @@ def DWT_reduce(series: np.ndarray, w: int, wavelet: str = "db6", level: int = 3)
         
     return cA[np.linspace(0, len(cA) - 1, w).astype(int)]
 
-
 def SVD_reduce(series: np.ndarray, w: int, window: int = 10) -> np.ndarray:
     """
     SVD-based reduction via Hankel embedding.
@@ -96,3 +94,12 @@ def SVD_reduce(series: np.ndarray, w: int, window: int = 10) -> np.ndarray:
         return np.zeros(w)
         
     return collapsed[np.linspace(0, len(collapsed) - 1, w).astype(int)]
+
+def UniformDownsampling_reduce(series: np.ndarray, w: int) -> np.ndarray:
+    """
+    Uniform downsampling reduction.
+
+    Subsamples the series at regular intervals to reduce it to length w.
+    """
+    series = np.asarray(series)
+    return series[np.linspace(0, len(series) - 1, w).astype(int)]

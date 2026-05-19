@@ -3,7 +3,7 @@ This file will be the new entry point for the reduction methods.
 It will import the methods from the new modularized files.
 """
 # Statistical methods
-from .statistical import PAA_reduce, DFT_reduce, DWT_reduce, SVD_reduce, PAA_optimized_reduce
+from .statistical import PAA_reduce, DFT_reduce, DWT_reduce, SVD_reduce, PAA_optimized_reduce, UniformDownsampling_reduce
 
 # Manifold and matrix decomposition methods
 from .manifold import PCA_reduce, KPCA_reduce, Isomap_reduce
@@ -21,6 +21,7 @@ __all__ = [
     "DFT_reduce",
     "DWT_reduce",
     "SVD_reduce",
+    "UniformDownsampling_reduce",
     # Manifold
     "PCA_reduce",
     "KPCA_reduce",

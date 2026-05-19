@@ -83,6 +83,7 @@ ALL_REDUCTION_METHODS = {
     "TCN":     reduction.TCNReducer,
     "TCN-SIT": reduction.TCN_SIT_reduce,
     "S2V":    reduction.Series2VecReducer,
+    "UniformDownsampling": reduction.UniformDownsampling_reduce,
 }
 
 
